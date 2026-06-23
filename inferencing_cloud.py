@@ -1,9 +1,6 @@
 from pathlib import Path
-import os
-import boto3
 import joblib
 import pandas as pd
-import streamlit as st
 
 MODEL_LOCAL = Path(__file__).parent / 'final_model_pipeline.pkl'
 MAPPING_LOCAL = Path(__file__).parent / 'target_mapping.pkl'
@@ -21,24 +18,8 @@ CATEGORICAL_FEATURES = [
 ]
 ALL_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 
-def _download_from_s3(bucket, s3_key, local_path):
-    session = boto3.Session(
-        aws_access_key_id=st.secrets["AWS_ACCESS_KEY_ID"],
-        aws_secret_access_key=st.secrets["AWS_SECRET_ACCESS_KEY"],
-        aws_session_token=st.secrets["AWS_SESSION_TOKEN"],
-        region_name=st.secrets["AWS_DEFAULT_REGION"]
-    )
-    s3 = session.client('s3')
-    s3.download_file(bucket, s3_key, str(local_path))
-
 class InferenceService:
     def __init__(self, bucket=None):
-        if not MODEL_LOCAL.exists() or not MAPPING_LOCAL.exists():
-            if not bucket:
-                bucket = st.secrets.get("S3_BUCKET")
-            _download_from_s3(bucket, 'final_model_pipeline.pkl', MODEL_LOCAL)
-            _download_from_s3(bucket, 'target_mapping.pkl', MAPPING_LOCAL)
-            
         self.pipeline = joblib.load(MODEL_LOCAL)
         self.targetMapping = joblib.load(MAPPING_LOCAL)
         self.inverseMapping = {v: k for k, v in self.targetMapping.items()}
@@ -70,7 +51,7 @@ class InferenceService:
         df = df.copy()
         df['Prediction'] = [self.inverseMapping[p] for p in predsEncoded]
         return df
-        
+
 TEST_CASES = {
     'Good': {
         'Age': 37.0, 'Annual_Income': 45941.28, 'Monthly_Inhand_Salary': 3868.58,
@@ -106,12 +87,3 @@ TEST_CASES = {
         'Payment_of_Min_Amount': 'Yes', 'Payment_Behaviour': 'Low_spent_Small_value_payments',
     },
 }
-
-if __name__ == '__main__':
-    service = InferenceService()
-    print("Smoke-testing one representative case per class:\n")
-    for trueLabel, payload in TEST_CASES.items():
-        result = service.predict_one(payload)
-        status = "OK " if result['prediction'] == trueLabel else "MISS"
-        print(f"[{status}] expected={trueLabel:8s} predicted={result['prediction']:8s} "
-              f"probs={ {k: round(v, 3) for k, v in result.get('probabilities', {}).items()} }")
