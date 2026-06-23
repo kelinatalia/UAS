@@ -36,8 +36,8 @@ class InferenceService:
         if not MODEL_LOCAL.exists() or not MAPPING_LOCAL.exists():
             if not bucket:
                 bucket = st.secrets.get("S3_BUCKET")
-            _download_from_s3(bucket, 'models/final_model_pipeline.pkl', MODEL_LOCAL)
-            _download_from_s3(bucket, 'models/target_mapping.pkl', MAPPING_LOCAL)
+            _download_from_s3(bucket, 'final_model_pipeline.pkl', MODEL_LOCAL)
+            _download_from_s3(bucket, 'target_mapping.pkl', MAPPING_LOCAL)
             
         self.pipeline = joblib.load(MODEL_LOCAL)
         self.targetMapping = joblib.load(MAPPING_LOCAL)
