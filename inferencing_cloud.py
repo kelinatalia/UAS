@@ -1,25 +1,11 @@
-"""
-inferencing_cloud.py  —  soal 2.b
-
-Versi cloud dari inferencing.py. Perbedaannya:
-- Kalau .pkl belum ada di folder lokal EC2, otomatis download dari S3 dulu.
-- Setelah download, caching lokal supaya request berikutnya gak perlu download lagi.
-
-Dipakai oleh app_streamlit_cloud.py.
-"""
-
 from pathlib import Path
 import os
 import boto3
 import joblib
 import pandas as pd
+import streamlit as st
 
-# S3 config — disesuaikan dengan nama bucket + key yang lu pakai waktu training
-S3_BUCKET    = os.environ.get('S3_BUCKET', 'GANTI_NAMA_BUCKET_LU')
-MODEL_S3_KEY = os.environ.get('MODEL_S3_KEY', 'models/final_model_pipeline.pkl')
-MAP_S3_KEY   = os.environ.get('MAP_S3_KEY',   'models/target_mapping.pkl')
-
-MODEL_LOCAL   = Path(__file__).parent / 'final_model_pipeline.pkl'
+MODEL_LOCAL = Path(__file__).parent / 'final_model_pipeline.pkl'
 MAPPING_LOCAL = Path(__file__).parent / 'target_mapping.pkl'
 
 NUMERIC_FEATURES = [
@@ -34,6 +20,56 @@ CATEGORICAL_FEATURES = [
     'Month', 'Occupation', 'Credit_Mix', 'Payment_of_Min_Amount', 'Payment_Behaviour'
 ]
 ALL_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
+
+def _download_from_s3(bucket, s3_key, local_path):
+    s3 = boto3.client(
+        's3',
+        aws_access_key_id=st.secrets["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=st.secrets["AWS_SECRET_ACCESS_KEY"],
+        aws_session_token=st.secrets["AWS_SESSION_TOKEN"],
+        region_name=st.secrets["AWS_DEFAULT_REGION"]
+    )
+    s3.download_file(bucket, s3_key, str(local_path))
+
+class InferenceService:
+    def __init__(self, bucket=None):
+        if not MODEL_LOCAL.exists() or not MAPPING_LOCAL.exists():
+            if not bucket:
+                bucket = st.secrets.get("S3_BUCKET")
+            _download_from_s3(bucket, 'models/final_model_pipeline.pkl', MODEL_LOCAL)
+            _download_from_s3(bucket, 'models/target_mapping.pkl', MAPPING_LOCAL)
+            
+        self.pipeline = joblib.load(MODEL_LOCAL)
+        self.targetMapping = joblib.load(MAPPING_LOCAL)
+        self.inverseMapping = {v: k for k, v in self.targetMapping.items()}
+
+    def _validate(self, inputDict: dict):
+        missing = [f for f in ALL_FEATURES if f not in inputDict]
+        if missing:
+            raise ValueError(f"Missing required fields: {missing}")
+
+    def predict_one(self, inputDict: dict) -> dict:
+        self._validate(inputDict)
+        df = pd.DataFrame([{f: inputDict[f] for f in ALL_FEATURES}])
+        predEncoded = self.pipeline.predict(df)[0]
+        prediction = self.inverseMapping[predEncoded]
+        result = {'prediction': prediction}
+        if hasattr(self.pipeline, 'predict_proba'):
+            proba = self.pipeline.predict_proba(df)[0]
+            classes = self.pipeline.named_steps['classifier'].classes_
+            result['probabilities'] = {
+                self.inverseMapping[int(c)]: float(p) for c, p in zip(classes, proba)
+            }
+        return result
+
+    def predict_batch(self, df: pd.DataFrame) -> pd.DataFrame:
+        missing = [f for f in ALL_FEATURES if f not in df.columns]
+        if missing:
+            raise ValueError(f"Missing required columns: {missing}")
+        predsEncoded = self.pipeline.predict(df[ALL_FEATURES])
+        df = df.copy()
+        df['Prediction'] = [self.inverseMapping[p] for p in predsEncoded]
+        return df
 
 TEST_CASES = {
     'Good': {
@@ -70,43 +106,3 @@ TEST_CASES = {
         'Payment_of_Min_Amount': 'Yes', 'Payment_Behaviour': 'Low_spent_Small_value_payments',
     },
 }
-
-
-def _download_if_missing(bucket: str, s3_key: str, local_path: Path):
-    if local_path.exists():
-        print(f"[cache] {local_path.name} sudah ada lokal, skip download.")
-        return
-    print(f"[S3] Downloading s3://{bucket}/{s3_key} -> {local_path}")
-    boto3.client('s3').download_file(bucket, s3_key, str(local_path))
-    print(f"[S3] Download selesai.")
-
-
-class InferenceService:
-    def __init__(self, bucket: str = S3_BUCKET,
-                  model_s3_key: str = MODEL_S3_KEY,
-                  map_s3_key: str = MAP_S3_KEY):
-        _download_if_missing(bucket, model_s3_key, MODEL_LOCAL)
-        _download_if_missing(bucket, map_s3_key,   MAPPING_LOCAL)
-
-        self.pipeline       = joblib.load(MODEL_LOCAL)
-        self.target_mapping = joblib.load(MAPPING_LOCAL)
-        self.inverse_mapping = {v: k for k, v in self.target_mapping.items()}
-
-    def _validate(self, input_dict):
-        missing = [f for f in ALL_FEATURES if f not in input_dict]
-        if missing:
-            raise ValueError(f"Missing fields: {missing}")
-
-    def predict_one(self, input_dict: dict) -> dict:
-        self._validate(input_dict)
-        df = pd.DataFrame([{f: input_dict[f] for f in ALL_FEATURES}])
-        pred_encoded = self.pipeline.predict(df)[0]
-        prediction   = self.inverse_mapping[pred_encoded]
-        result = {'prediction': prediction}
-        if hasattr(self.pipeline, 'predict_proba'):
-            proba   = self.pipeline.predict_proba(df)[0]
-            classes = self.pipeline.named_steps['classifier'].classes_
-            result['probabilities'] = {
-                self.inverse_mapping[int(c)]: float(p) for c, p in zip(classes, proba)
-            }
-        return result
