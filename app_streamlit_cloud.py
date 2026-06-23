@@ -8,10 +8,7 @@ st.set_page_config(page_title="Credit Score Predictor", layout="wide")
 @st.cache_resource
 def load_service():
     try:
-        bucket = st.secrets.get("S3_BUCKET") if "S3_BUCKET" in st.secrets else os.environ.get('S3_BUCKET')
-        if not bucket:
-            raise ValueError("S3_BUCKET not found")
-        return InferenceService(bucket=bucket)
+        return InferenceService()
     except Exception as e:
         return e
 
