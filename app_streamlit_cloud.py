@@ -1,7 +1,7 @@
+import os
 import streamlit as st
 import pandas as pd
 from inferencing_cloud import InferenceService, TEST_CASES, ALL_FEATURES
-import os
 
 st.set_page_config(page_title="Credit Score Predictor (Cloud)", layout="wide")
 
@@ -9,8 +9,8 @@ st.set_page_config(page_title="Credit Score Predictor (Cloud)", layout="wide")
 @st.cache_resource
 def load_service():
     try:
-        bucket = os.environ.get('S3_BUCKET', 'uas-2802472426')
-        return InferenceService(bucket=bucket)
+        endpoint = os.environ.get('ENDPOINT_NAME', 'UAS-endpoint')
+        return InferenceService(endpoint_name=endpoint)
     except Exception as e:
         return e
 
@@ -20,22 +20,22 @@ service = load_service()
 st.sidebar.title("Application Information")
 st.sidebar.info(
     "Credit Score prediction tool for customers (Good / Standard / Poor). "
-    "The model is retrieved from AWS S3."
+    "The model is served via AWS SageMaker Endpoint."
 )
 
 if isinstance(service, Exception):
     st.sidebar.error(str(service))
     st.error(
-        f"Failed to load model from S3: {service}\n\n"
+        f"Failed to connect to SageMaker Endpoint: {service}\n\n"
         "Please ensure:\n"
-        "1. The `S3_BUCKET` environment variable is correctly configured\n"
-        "2. The EC2 instance has an IAM role with appropriate S3 permissions\n"
-        "3. pipeline_cloud.py has been executed and the model is uploaded to S3"
+        "1. The `ENDPOINT_NAME` environment variable is correctly configured\n"
+        "2. The EC2 instance has an IAM role with appropriate SageMaker permissions\n"
+        "3. The endpoint has been deployed via deploy_endpoint.ipynb"
     )
     st.stop()
 
 st.title("Credit Score Prediction Dashboard")
-st.caption("Model hosted on AWS S3. Input customer data or use the preset test cases in the sidebar.")
+st.caption("Model served via AWS SageMaker Endpoint. Input customer data or use the preset test cases in the sidebar.")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Quick Test Case")
@@ -127,7 +127,7 @@ with tab2:
 st.markdown("---")
 if st.button("Predict Credit Score", type="primary", use_container_width=True):
     input_dict = {f: st.session_state[f] for f in ALL_FEATURES}
-    with st.spinner("Analyzing data..."):
+    with st.spinner("Sending data to AWS SageMaker..."):
         try:
             result     = service.predict_one(input_dict)
             prediction = result['prediction']
