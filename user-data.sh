@@ -1,10 +1,10 @@
 #!/bin/bash
 set -eu
 
-GIT_REPO="https://github.com/USERNAME/NAMA-REPO.git"
+GIT_REPO="https://github.com/kelinatalia/UAS.git"
 SUBFOLDER=""
 APP_FILE="app_streamlit_cloud.py"
-S3_BUCKET="NAMA-BUCKET-LO"
+S3_BUCKET="sagemaker-us-east-1-488236761809"
 
 REGION="us-east-1"
 APP_DIR="/opt/credit-app"
