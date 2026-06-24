@@ -4,7 +4,7 @@ set -eu
 GIT_REPO="https://github.com/kelinatalia/UAS.git"
 SUBFOLDER=""
 APP_FILE="app_streamlit_cloud.py"
-S3_BUCKET="sagemaker-us-east-1-488236761809"
+ENDPOINT_NAME="UAS-endpoint"
 
 REGION="us-east-1"
 APP_DIR="/opt/credit-app"
@@ -32,7 +32,7 @@ python3 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install --upgrade pip
 "$VENV_DIR/bin/pip" install -r "$APP_PATH/requirements.txt"
 
-cat >/etc/systemd/system/streamlit.service <<EOF
+cat >/etc/systemd/system/streamlit.service <<SVCEOF
 [Unit]
 Description=Streamlit App
 After=network.target
@@ -41,7 +41,7 @@ After=network.target
 Type=simple
 User=ec2-user
 WorkingDirectory=$APP_PATH
-Environment=S3_BUCKET=$S3_BUCKET
+Environment=ENDPOINT_NAME=$ENDPOINT_NAME
 Environment=AWS_REGION=$REGION
 ExecStart=$VENV_DIR/bin/streamlit run $APP_FILE \\
   --server.address 0.0.0.0 \\
@@ -54,7 +54,7 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SVCEOF
 
 systemctl daemon-reload
 systemctl enable --now streamlit.service
