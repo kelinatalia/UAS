@@ -1,15 +1,10 @@
-from pathlib import Path
 import os
+import json
 import boto3
-import joblib
 import pandas as pd
 
-S3_BUCKET    = os.environ.get('S3_BUCKET', 'uas-2802472426')
-MODEL_S3_KEY = os.environ.get('MODEL_S3_KEY', 'models/final_model_pipeline.pkl')
-MAP_S3_KEY   = os.environ.get('MAP_S3_KEY',   'models/target_mapping.pkl')
-
-MODEL_LOCAL   = Path(__file__).parent / 'final_model_pipeline.pkl'
-MAPPING_LOCAL = Path(__file__).parent / 'target_mapping.pkl'
+ENDPOINT_NAME = os.environ.get('ENDPOINT_NAME', 'UAS-endpoint')
+REGION        = os.environ.get('AWS_REGION', 'us-east-1')
 
 NUMERIC_FEATURES = [
     'Age', 'Annual_Income', 'Monthly_Inhand_Salary', 'Num_Bank_Accounts',
@@ -61,22 +56,10 @@ TEST_CASES = {
 }
 
 
-def _download_if_missing(bucket: str, s3_key: str, local_path: Path):
-    if local_path.exists():
-        return
-    boto3.client('s3').download_file(bucket, s3_key, str(local_path))
-
-
 class InferenceService:
-    def __init__(self, bucket: str = S3_BUCKET,
-                  model_s3_key: str = MODEL_S3_KEY,
-                  map_s3_key: str = MAP_S3_KEY):
-        _download_if_missing(bucket, model_s3_key, MODEL_LOCAL)
-        _download_if_missing(bucket, map_s3_key,   MAPPING_LOCAL)
-
-        self.pipeline       = joblib.load(MODEL_LOCAL)
-        self.target_mapping = joblib.load(MAPPING_LOCAL)
-        self.inverse_mapping = {v: k for k, v in self.target_mapping.items()}
+    def __init__(self, endpoint_name: str = ENDPOINT_NAME, region: str = REGION):
+        self.endpoint_name = endpoint_name
+        self.runtime = boto3.client('sagemaker-runtime', region_name=region)
 
     def _validate(self, input_dict):
         missing = [f for f in ALL_FEATURES if f not in input_dict]
@@ -85,14 +68,22 @@ class InferenceService:
 
     def predict_one(self, input_dict: dict) -> dict:
         self._validate(input_dict)
-        df = pd.DataFrame([{f: input_dict[f] for f in ALL_FEATURES}])
-        pred_encoded = self.pipeline.predict(df)[0]
-        prediction   = self.inverse_mapping[pred_encoded]
-        result = {'prediction': prediction}
-        if hasattr(self.pipeline, 'predict_proba'):
-            proba   = self.pipeline.predict_proba(df)[0]
-            classes = self.pipeline.named_steps['classifier'].classes_
-            result['probabilities'] = {
-                self.inverse_mapping[int(c)]: float(p) for c, p in zip(classes, proba)
-            }
-        return result
+        features = [input_dict[f] for f in ALL_FEATURES]
+        payload = {"instances": [features]}
+
+        response = self.runtime.invoke_endpoint(
+            EndpointName=self.endpoint_name,
+            ContentType="application/json",
+            Accept="application/json",
+            Body=json.dumps(payload),
+        )
+        result = json.loads(response["Body"].read().decode("utf-8"))
+
+        label = result["labels"][0]
+        probs = result["probabilities"][0]
+        label_order = ['Poor', 'Standard', 'Good']
+
+        return {
+            'prediction': label,
+            'probabilities': {l: p for l, p in zip(label_order, probs)}
+        }
